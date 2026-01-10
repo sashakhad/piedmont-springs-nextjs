@@ -38,11 +38,16 @@ export async function GET(request: NextRequest): Promise<NextResponse<Availabili
     // Fetch availability
     const availability = await getAllAvailability(fromDate, toDate, services);
 
+    const formatDate = (d: Date): string => {
+      const parts = d.toISOString().split('T');
+      return parts[0] ?? '';
+    };
+
     const response: AvailabilityResponse = {
       availability,
       services: servicesInfo,
-      fromDate: fromDate.toISOString().split('T')[0],
-      toDate: toDate.toISOString().split('T')[0],
+      fromDate: formatDate(fromDate),
+      toDate: formatDate(toDate),
       fetchedAt: new Date().toISOString(),
     };
 
