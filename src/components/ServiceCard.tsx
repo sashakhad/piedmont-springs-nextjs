@@ -3,7 +3,7 @@
 import { cn } from '@/lib/utils';
 import { TimeSlotPill, TimeSlotOverflow } from './TimeSlotPill';
 import type { AvailabilityByDate, TimeSlot } from '@/lib/piedmont/types';
-import { buildBookingUrl } from '@/lib/piedmont/api-client';
+import { buildBookingUrl } from '@/lib/piedmont/client-utils';
 
 interface ServiceCardProps {
   serviceName: string;
