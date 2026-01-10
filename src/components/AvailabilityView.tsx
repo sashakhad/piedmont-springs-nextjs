@@ -1,11 +1,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ServiceCard } from './ServiceCard';
-import { SERVICE_CONFIG, SECTION_TITLES, DEFAULT_DAYS } from '@/lib/piedmont/constants';
-import type { AvailabilityResponse, ServiceInfo } from '@/lib/piedmont/types';
+import { SERVICE_CONFIG } from '@/lib/piedmont/constants';
+import type { AvailabilityResponse, AvailabilityByDate, ServiceInfo } from '@/lib/piedmont/types';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, Loader2, ExternalLink } from 'lucide-react';
+import { RefreshCw, Loader2, ExternalLink, Calendar, ChevronRight } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { buildBookingUrl } from '@/lib/piedmont/client-utils';
+
+type DateRange = 'week' | 'two-weeks' | 'month';
+
+const DATE_RANGES: Array<{ key: DateRange; label: string; days: number }> = [
+  { key: 'week', label: 'This Week', days: 7 },
+  { key: 'two-weeks', label: '2 Weeks', days: 14 },
+  { key: 'month', label: 'Month', days: 30 },
+];
 
 interface AvailabilityViewProps {
   initialData?: AvailabilityResponse | null;
@@ -15,13 +24,17 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
   const [data, setData] = useState<AvailabilityResponse | null>(initialData ?? null);
   const [loading, setLoading] = useState(!initialData);
   const [error, setError] = useState<string | null>(null);
+  const [dateRange, setDateRange] = useState<DateRange>('week');
+  const [selectedService, setSelectedService] = useState<string>(SERVICE_CONFIG[0]?.name ?? '');
 
-  async function fetchAvailability() {
+  const currentDays = DATE_RANGES.find((r) => r.key === dateRange)?.days ?? 7;
+
+  async function fetchAvailability(days: number) {
     setLoading(true);
     setError(null);
 
     try {
-      const response = await fetch(`/api/availability?days=${DEFAULT_DAYS}`);
+      const response = await fetch(`/api/availability?days=${days}`);
       if (!response.ok) {
         const errorData = await response.json();
         throw new Error(errorData.error || 'Failed to fetch availability');
@@ -36,10 +49,12 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
   }
 
   useEffect(() => {
-    if (!initialData) {
-      fetchAvailability();
-    }
-  }, [initialData]);
+    fetchAvailability(currentDays);
+  }, [currentDays]);
+
+  function handleDateRangeChange(range: DateRange) {
+    setDateRange(range);
+  }
 
   // Build service lookup
   const serviceMap = new Map<string, ServiceInfo>();
@@ -49,27 +64,15 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
     }
   }
 
-  // Format date range for display
-  const formatDateRange = () => {
-    if (!data) {return '';}
-    const from = new Date(data.fromDate);
-    const to = new Date(data.toDate);
-    return `${from.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })} – ${to.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
-  };
-
-  // Format fetch time
-  const formatFetchTime = () => {
-    if (!data) {return '';}
-    const fetchedAt = new Date(data.fetchedAt);
-    return fetchedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  };
+  const selectedServiceInfo = serviceMap.get(selectedService);
+  const selectedAvailability = data?.availability[selectedService] ?? {};
 
   if (loading && !data) {
     return (
-      <div className='flex min-h-[400px] flex-col items-center justify-center gap-4'>
-        <Loader2 className='h-8 w-8 animate-spin text-amber-600' />
-        <p className='text-stone-500 dark:text-stone-400'>Loading availability...</p>
-        <p className='text-sm text-stone-400 dark:text-stone-500'>
+      <div className="flex min-h-[400px] flex-col items-center justify-center gap-4">
+        <Loader2 className="h-8 w-8 animate-spin text-amber-600" />
+        <p className="text-stone-500 dark:text-stone-400">Loading availability...</p>
+        <p className="text-sm text-stone-400 dark:text-stone-500">
           This may take a moment on first load
         </p>
       </div>
@@ -78,13 +81,15 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
 
   if (error) {
     return (
-      <div className='flex min-h-[400px] flex-col items-center justify-center gap-4'>
-        <div className='text-center'>
-          <p className='text-lg font-medium text-red-600 dark:text-red-400'>Error loading availability</p>
-          <p className='mt-1 text-stone-500 dark:text-stone-400'>{error}</p>
+      <div className="flex min-h-[400px] flex-col items-center justify-center gap-4">
+        <div className="text-center">
+          <p className="text-lg font-medium text-red-600 dark:text-red-400">
+            Error loading availability
+          </p>
+          <p className="mt-1 text-stone-500 dark:text-stone-400">{error}</p>
         </div>
-        <Button onClick={fetchAvailability} variant='outline'>
-          <RefreshCw className='mr-2 h-4 w-4' />
+        <Button onClick={() => fetchAvailability(currentDays)} variant="outline">
+          <RefreshCw className="mr-2 h-4 w-4" />
           Try Again
         </Button>
       </div>
@@ -92,70 +97,273 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
   }
 
   return (
-    <div className='space-y-8'>
-      {/* Header Info */}
-      <div className='flex flex-wrap items-center justify-between gap-4'>
-        <div>
-          <p className='text-stone-500 dark:text-stone-400'>{formatDateRange()}</p>
-          <p className='text-sm text-stone-400 dark:text-stone-500'>Updated {formatFetchTime()}</p>
+    <div className="space-y-6">
+      {/* Date Range Selector */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex gap-2">
+          {DATE_RANGES.map((range) => (
+            <Button
+              key={range.key}
+              variant={dateRange === range.key ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => handleDateRangeChange(range.key)}
+              disabled={loading}
+              className={cn(
+                dateRange === range.key
+                  ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                  : 'border-stone-300 dark:border-stone-600'
+              )}
+            >
+              <Calendar className="mr-1.5 h-3.5 w-3.5" />
+              {range.label}
+            </Button>
+          ))}
         </div>
         <Button
-          onClick={fetchAvailability}
-          variant='outline'
-          size='sm'
+          onClick={() => fetchAvailability(currentDays)}
+          variant="ghost"
+          size="sm"
           disabled={loading}
-          className='border-stone-300 dark:border-stone-600'
         >
           {loading ? (
-            <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+            <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
-            <RefreshCw className='mr-2 h-4 w-4' />
+            <RefreshCw className="h-4 w-4" />
           )}
-          Refresh
         </Button>
       </div>
 
-      {/* Service Groups */}
-      {data && (
-        <div className='space-y-10'>
-          {SERVICE_CONFIG.map((config, index) => {
-            const service = serviceMap.get(config.name);
-            const availability = data.availability[config.name] || {};
+      {/* Service Tabs */}
+      <div className="flex gap-1 overflow-x-auto border-b border-stone-200 dark:border-stone-700 pb-px">
+        {SERVICE_CONFIG.map((config) => {
+          const isSelected = selectedService === config.name;
+          const availability = data?.availability[config.name] ?? {};
+          const totalSlots = Object.values(availability).reduce(
+            (sum, slots) => sum + slots.length,
+            0
+          );
 
-            // Check if this is the start of a new section
-            const sectionTitle = SECTION_TITLES[index];
+          return (
+            <button
+              key={config.name}
+              onClick={() => setSelectedService(config.name)}
+              className={cn(
+                'flex items-center gap-2 whitespace-nowrap px-4 py-2.5 text-sm font-medium transition-colors',
+                'border-b-2 -mb-px',
+                isSelected
+                  ? 'border-amber-500 text-amber-700 dark:text-amber-400'
+                  : 'border-transparent text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-300'
+              )}
+            >
+              <span>{config.icon}</span>
+              <span className="hidden sm:inline">{config.name.replace(/^\d+\s*Minute\s*/, '').replace('One Hour ', '')}</span>
+              {totalSlots > 0 && (
+                <span
+                  className={cn(
+                    'rounded-full px-1.5 py-0.5 text-xs',
+                    isSelected
+                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300'
+                      : 'bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400'
+                  )}
+                >
+                  {totalSlots}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
 
-            return (
-              <div key={config.name}>
-                {sectionTitle && (
-                  <h2 className='mb-6 border-b border-stone-200 pb-2 text-sm font-semibold uppercase tracking-wider text-stone-400 dark:border-stone-700 dark:text-stone-500'>
-                    {sectionTitle}
-                  </h2>
-                )}
-                <ServiceCard
-                  serviceName={config.name}
-                  serviceId={service?.id ?? 0}
-                  icon={config.icon}
-                  availability={availability}
-                />
-              </div>
-            );
-          })}
+      {/* Selected Service Content */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold text-stone-800 dark:text-stone-200">
+            {selectedService}
+          </h2>
+          {selectedServiceInfo && (
+            <span className="text-sm text-stone-500 dark:text-stone-400">
+              ${selectedServiceInfo.price} · {selectedServiceInfo.durationMinutes} min
+            </span>
+          )}
         </div>
-      )}
+
+        <AvailabilityGrid
+          availability={selectedAvailability}
+          serviceId={selectedServiceInfo?.id ?? 0}
+          serviceName={selectedService}
+        />
+      </div>
 
       {/* Footer */}
-      <footer className='border-t border-stone-200 pt-6 text-center dark:border-stone-700'>
+      <footer className="border-t border-stone-200 pt-4 text-center dark:border-stone-700">
         <a
-          href='https://go.booker.com/location/PiedmontSprings'
-          target='_blank'
-          rel='noopener noreferrer'
-          className='inline-flex items-center gap-1 text-amber-600 hover:underline dark:text-amber-500'
+          href="https://go.booker.com/location/PiedmontSprings"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-sm text-amber-600 hover:underline dark:text-amber-500"
         >
           Book at piedmontsprings.com
-          <ExternalLink className='h-3 w-3' />
+          <ExternalLink className="h-3 w-3" />
         </a>
       </footer>
     </div>
   );
+}
+
+// --- Availability Grid Component ---
+
+interface AvailabilityGridProps {
+  availability: AvailabilityByDate;
+  serviceId: number;
+  serviceName: string;
+}
+
+function AvailabilityGrid({ availability, serviceId, serviceName }: AvailabilityGridProps) {
+  const sortedDates = Object.keys(availability).sort();
+
+  if (sortedDates.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-stone-300 bg-stone-50 py-12 text-center dark:border-stone-700 dark:bg-stone-900/50">
+        <p className="text-stone-500 dark:text-stone-400">No availability in this time range</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {sortedDates.map((date) => {
+        const slots = availability[date];
+        if (!slots) {return null;}
+
+        return (
+          <DateRow
+            key={date}
+            date={date}
+            slots={slots}
+            serviceId={serviceId}
+            serviceName={serviceName}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+// --- Date Row Component ---
+
+interface DateRowProps {
+  date: string;
+  slots: Array<{ startTime: string; endTime: string; employeeId: number | null; employeeName: string | null }>;
+  serviceId: number;
+  serviceName: string;
+}
+
+function DateRow({ date, slots, serviceId, serviceName }: DateRowProps) {
+  const bookingUrl = buildBookingUrl(serviceId, serviceName, date);
+  const dateObj = new Date(`${date}T00:00:00`);
+  const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+  const monthDay = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  // Check if today/tomorrow by comparing date strings
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+  const isToday = date === todayStr;
+  const isTomorrow = date === tomorrowStr;
+
+  // Group by time of day
+  const morning: string[] = [];
+  const afternoon: string[] = [];
+  const evening: string[] = [];
+
+  for (const slot of slots) {
+    const hour = parseInt(slot.startTime.split('T')[1]?.slice(0, 2) ?? '0', 10);
+    const formatted = formatTime(slot.startTime);
+    if (hour < 12) {
+      morning.push(formatted);
+    } else if (hour < 17) {
+      afternoon.push(formatted);
+    } else {
+      evening.push(formatted);
+    }
+  }
+
+  return (
+    <a
+      href={bookingUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={cn(
+        'group flex items-start gap-4 rounded-lg border p-4 transition-all',
+        'border-stone-200 bg-white hover:border-amber-500 hover:shadow-md',
+        'dark:border-stone-700 dark:bg-stone-800/50 dark:hover:border-amber-500'
+      )}
+    >
+      {/* Date Column */}
+      <div className="w-16 shrink-0 text-center">
+        <div
+          className={cn(
+            'text-xs font-medium uppercase',
+            isToday
+              ? 'text-amber-600 dark:text-amber-400'
+              : isTomorrow
+                ? 'text-blue-600 dark:text-blue-400'
+                : 'text-stone-400 dark:text-stone-500'
+          )}
+        >
+          {isToday ? 'Today' : isTomorrow ? 'Tomorrow' : dayName}
+        </div>
+        <div className="text-lg font-semibold text-stone-800 dark:text-stone-200">
+          {monthDay}
+        </div>
+      </div>
+
+      {/* Times Grid */}
+      <div className="flex-1 space-y-2">
+        <TimeSection label="AM" times={morning} />
+        <TimeSection label="PM" times={afternoon} />
+        <TimeSection label="Eve" times={evening} />
+      </div>
+
+      {/* Arrow */}
+      <ChevronRight className="h-5 w-5 shrink-0 text-stone-300 transition-colors group-hover:text-amber-500 dark:text-stone-600" />
+    </a>
+  );
+}
+
+function TimeSection({ label, times }: { label: string; times: string[] }) {
+  if (times.length === 0) {return null;}
+
+  return (
+    <div className="flex items-baseline gap-2">
+      <span className="w-8 shrink-0 text-xs font-medium text-stone-400 dark:text-stone-500">
+        {label}
+      </span>
+      <div className="flex flex-wrap gap-1">
+        {times.map((time, i) => (
+          <span
+            key={i}
+            className="rounded bg-stone-100 px-1.5 py-0.5 text-xs tabular-nums text-stone-600 dark:bg-stone-700 dark:text-stone-300"
+          >
+            {time}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function formatTime(isoTime: string): string {
+  const timePart = isoTime.split('T')[1];
+  if (!timePart) {return isoTime;}
+
+  const [hourStr, minuteStr] = timePart.slice(0, 5).split(':');
+  const hour = parseInt(hourStr ?? '0', 10);
+  const minute = parseInt(minuteStr ?? '0', 10);
+  const displayHour = hour % 12 || 12;
+
+  return `${displayHour}:${minute.toString().padStart(2, '0')}`;
 }
