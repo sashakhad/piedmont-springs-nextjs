@@ -51,7 +51,7 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
 
   // Format date range for display
   const formatDateRange = () => {
-    if (!data) return '';
+    if (!data) {return '';}
     const from = new Date(data.fromDate);
     const to = new Date(data.toDate);
     return `${from.toLocaleDateString('en-US', { month: 'long', day: 'numeric' })} – ${to.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`;
@@ -59,7 +59,7 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
 
   // Format fetch time
   const formatFetchTime = () => {
-    if (!data) return '';
+    if (!data) {return '';}
     const fetchedAt = new Date(data.fetchedAt);
     return fetchedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   };

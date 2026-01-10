@@ -11,10 +11,13 @@ interface TimeSlotPillProps {
  * Format ISO time string to readable format (e.g., "2:30pm")
  */
 function formatTime(isoTime: string): string {
-  if (!isoTime.includes('T')) return isoTime;
+  const parts = isoTime.split('T');
+  const timePart = parts[1];
+  if (!timePart) {return isoTime;}
 
-  const timePart = isoTime.split('T')[1].slice(0, 5);
-  const [hourStr, minuteStr] = timePart.split(':');
+  const timeComponents = timePart.slice(0, 5).split(':');
+  const hourStr = timeComponents[0] ?? '0';
+  const minuteStr = timeComponents[1] ?? '0';
   const hour = parseInt(hourStr, 10);
   const minute = parseInt(minuteStr, 10);
   const period = hour < 12 ? 'am' : 'pm';

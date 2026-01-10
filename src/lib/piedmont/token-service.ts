@@ -59,8 +59,9 @@ async function obtainTokenViaPlaywright(): Promise<string | null> {
       // Look for access_token in query params of Booker API calls
       if (url.includes('access_token=') && url.includes('api.booker.com')) {
         const match = url.match(/access_token=([^&]+)/);
-        if (match && !accessToken) {
-          accessToken = match[1];
+        const token = match?.[1];
+        if (token && !accessToken) {
+          accessToken = token;
           console.log('✓ Token captured');
         }
       }

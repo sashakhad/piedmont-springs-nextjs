@@ -14,7 +14,6 @@ import {
 } from './constants';
 import { getAccessToken } from './token-service';
 import type {
-  AvailabilityByDate,
   AvailabilityByService,
   BookerAvailabilityLocation,
   BookerMenuSection,
@@ -49,11 +48,15 @@ async function apiRequest<T>(
     'Content-Type': 'application/json',
   };
 
-  const response = await fetch(url.toString(), {
+  const fetchOptions: RequestInit = {
     method,
     headers,
-    body: jsonData ? JSON.stringify(jsonData) : undefined,
-  });
+  };
+  if (jsonData) {
+    fetchOptions.body = JSON.stringify(jsonData);
+  }
+
+  const response = await fetch(url.toString(), fetchOptions);
 
   if (!response.ok) {
     throw new Error(`API request failed: ${response.status} ${response.statusText}`);
@@ -69,13 +72,15 @@ function parseDuration(durationStr: string): number {
   let totalMinutes = 0;
 
   const hrMatch = durationStr.match(/(\d+)\s*hr/);
-  if (hrMatch) {
-    totalMinutes += parseInt(hrMatch[1], 10) * 60;
+  const hrValue = hrMatch?.[1];
+  if (hrValue) {
+    totalMinutes += parseInt(hrValue, 10) * 60;
   }
 
   const minMatch = durationStr.match(/(\d+)\s*min/);
-  if (minMatch) {
-    totalMinutes += parseInt(minMatch[1], 10);
+  const minValue = minMatch?.[1];
+  if (minValue) {
+    totalMinutes += parseInt(minValue, 10);
   }
 
   return totalMinutes;
@@ -159,8 +164,8 @@ export async function getAvailableDates(
           if (service.serviceId === serviceId) {
             // Parse ISO dates to YYYY-MM-DD format
             for (const dateStr of service.availability as string[]) {
-              const datePart = dateStr.split('T')[0];
-              if (!dates.includes(datePart)) {
+              const datePart = dateStr.split('T')[0] ?? '';
+              if (datePart && !dates.includes(datePart)) {
                 dates.push(datePart);
               }
             }
@@ -239,7 +244,7 @@ export async function getAllAvailability(
 
     // Get time slots for each available date
     for (const dateStr of availableDates) {
-      const dateObj = new Date(dateStr + 'T00:00:00');
+      const dateObj = new Date(`${dateStr  }T00:00:00`);
       const slots = await getTimeSlots(serviceId, dateObj);
       if (slots.length > 0) {
         result[serviceName][dateStr] = slots;
@@ -254,7 +259,7 @@ export async function getAllAvailability(
  * Format a Date object to YYYY-MM-DD string.
  */
 function formatDate(date: Date): string {
-  return date.toISOString().split('T')[0];
+  return date.toISOString().split('T')[0] ?? '';
 }
 
 /**

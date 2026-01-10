@@ -16,9 +16,11 @@ interface ServiceCardProps {
  * Get hour from ISO time string
  */
 function getHour(timeStr: string): number {
-  if (!timeStr.includes('T')) return 0;
-  const timePart = timeStr.split('T')[1].slice(0, 5);
-  return parseInt(timePart.split(':')[0], 10);
+  const parts = timeStr.split('T');
+  const timePart = parts[1];
+  if (!timePart) {return 0;}
+  const hourStr = timePart.slice(0, 2);
+  return parseInt(hourStr, 10) || 0;
 }
 
 /**
@@ -51,7 +53,7 @@ function groupSlotsByTimeOfDay(slots: TimeSlot[]): {
  * Format date string to readable format (e.g., "Sat, Jan 11")
  */
 function formatDateLabel(dateStr: string): string {
-  const date = new Date(dateStr + 'T00:00:00');
+  const date = new Date(`${dateStr  }T00:00:00`);
   return date.toLocaleDateString('en-US', {
     weekday: 'short',
     month: 'short',
@@ -66,7 +68,7 @@ interface TimeRowProps {
 }
 
 function TimeRow({ label, times, maxShow = 5 }: TimeRowProps) {
-  if (times.length === 0) return null;
+  if (times.length === 0) {return null;}
 
   const shown = times.slice(0, maxShow);
   const overflow = times.length - maxShow;
@@ -132,15 +134,19 @@ export function ServiceCard({ serviceName, serviceId, icon, availability }: Serv
 
       {hasAvailability ? (
         <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3'>
-          {sortedDates.map((date) => (
-            <DateCard
-              key={date}
-              date={date}
-              slots={availability[date]}
-              serviceId={serviceId}
-              serviceName={serviceName}
-            />
-          ))}
+          {sortedDates.map((date) => {
+            const slots = availability[date];
+            if (!slots) {return null;}
+            return (
+              <DateCard
+                key={date}
+                date={date}
+                slots={slots}
+                serviceId={serviceId}
+                serviceName={serviceName}
+              />
+            );
+          })}
         </div>
       ) : (
         <p className='py-2 italic text-stone-400 dark:text-stone-500'>No availability</p>
