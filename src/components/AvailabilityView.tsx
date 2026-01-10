@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import useSWR from 'swr';
 import { SERVICE_CONFIG } from '@/lib/piedmont/constants';
 import type { AvailabilityResponse, AvailabilityByDate, ServiceInfo } from '@/lib/piedmont/types';
@@ -26,6 +26,32 @@ const fetcher = async (url: string): Promise<AvailabilityResponse> => {
   return response.json();
 };
 
+/**
+ * Filter availability data to only include dates within the specified range
+ */
+function filterAvailabilityByDays(
+  availability: Record<string, AvailabilityByDate>,
+  days: number
+): Record<string, AvailabilityByDate> {
+  const today = new Date();
+  const cutoff = new Date(today);
+  cutoff.setDate(cutoff.getDate() + days);
+  const cutoffStr = cutoff.toISOString().split('T')[0] ?? '';
+
+  const filtered: Record<string, AvailabilityByDate> = {};
+
+  for (const [serviceName, dates] of Object.entries(availability)) {
+    filtered[serviceName] = {};
+    for (const [dateStr, slots] of Object.entries(dates)) {
+      if (dateStr <= cutoffStr) {
+        filtered[serviceName][dateStr] = slots;
+      }
+    }
+  }
+
+  return filtered;
+}
+
 interface AvailabilityViewProps {
   initialData?: AvailabilityResponse | null;
 }
@@ -34,38 +60,56 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
   const [dateRange, setDateRange] = useState<DateRange>('week');
   const [selectedService, setSelectedService] = useState<string>(SERVICE_CONFIG[0]?.name ?? '');
 
-  const currentDays = DATE_RANGES.find((r) => r.key === dateRange)?.days ?? 7;
-
-  const swrOptions = {
-    revalidateOnFocus: false,
-    revalidateOnReconnect: false,
-    dedupingInterval: 60000, // Don't refetch same key within 1 minute
-    keepPreviousData: true, // Show previous data while loading new range
-    ...(initialData ? { fallbackData: initialData } : {}),
-  };
-
+  // Always fetch full month - we'll filter locally for week/2-weeks
   const { data, error, isLoading, isValidating, mutate } = useSWR<AvailabilityResponse>(
-    `/api/availability?days=${currentDays}`,
+    '/api/availability?days=30',
     fetcher,
-    swrOptions
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      refreshInterval: 60 * 60 * 1000, // Auto-refresh every hour
+      dedupingInterval: 5 * 60 * 1000, // Don't refetch within 5 minutes
+      ...(initialData ? { fallbackData: initialData } : {}),
+    }
   );
 
-  const loading = isLoading || isValidating;
+  const loading = isLoading;
+  const refreshing = isValidating && !isLoading;
 
-  function handleDateRangeChange(range: DateRange) {
-    setDateRange(range);
-  }
+  // Filter availability based on selected date range
+  const currentDays = DATE_RANGES.find((r) => r.key === dateRange)?.days ?? 7;
+  
+  const filteredAvailability = useMemo(() => {
+    if (!data?.availability) return {};
+    return filterAvailabilityByDays(data.availability, currentDays);
+  }, [data?.availability, currentDays]);
 
   // Build service lookup
-  const serviceMap = new Map<string, ServiceInfo>();
-  if (data) {
-    for (const service of data.services) {
-      serviceMap.set(service.name, service);
+  const serviceMap = useMemo(() => {
+    const map = new Map<string, ServiceInfo>();
+    if (data) {
+      for (const service of data.services) {
+        map.set(service.name, service);
+      }
     }
-  }
+    return map;
+  }, [data]);
 
   const selectedServiceInfo = serviceMap.get(selectedService);
-  const selectedAvailability = data?.availability[selectedService] ?? {};
+  const selectedAvailability = filteredAvailability[selectedService] ?? {};
+
+  // Count slots per service for the filtered range
+  const serviceCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const config of SERVICE_CONFIG) {
+      const availability = filteredAvailability[config.name] ?? {};
+      counts[config.name] = Object.values(availability).reduce(
+        (sum, slots) => sum + slots.length,
+        0
+      );
+    }
+    return counts;
+  }, [filteredAvailability]);
 
   if (loading && !data) {
     return (
@@ -108,8 +152,7 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
               key={range.key}
               variant={dateRange === range.key ? 'default' : 'outline'}
               size="sm"
-              onClick={() => handleDateRangeChange(range.key)}
-              disabled={loading}
+              onClick={() => setDateRange(range.key)}
               className={cn(
                 dateRange === range.key
                   ? 'bg-amber-600 hover:bg-amber-700 text-white'
@@ -125,13 +168,10 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
           onClick={() => mutate()}
           variant="ghost"
           size="sm"
-          disabled={loading}
+          disabled={refreshing}
+          title="Refresh availability"
         >
-          {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4" />
-          )}
+          <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
         </Button>
       </div>
 
@@ -139,11 +179,7 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
       <div className="flex gap-1 overflow-x-auto border-b border-stone-200 dark:border-stone-700 pb-px">
         {SERVICE_CONFIG.map((config) => {
           const isSelected = selectedService === config.name;
-          const availability = data?.availability[config.name] ?? {};
-          const totalSlots = Object.values(availability).reduce(
-            (sum, slots) => sum + slots.length,
-            0
-          );
+          const totalSlots = serviceCounts[config.name] ?? 0;
 
           return (
             <button
@@ -235,7 +271,7 @@ function AvailabilityGrid({ availability, serviceId, serviceName }: Availability
     <div className="space-y-3">
       {sortedDates.map((date) => {
         const slots = availability[date];
-        if (!slots) {return null;}
+        if (!slots) return null;
 
         return (
           <DateRow
@@ -337,7 +373,7 @@ function DateRow({ date, slots, serviceId, serviceName }: DateRowProps) {
 }
 
 function TimeSection({ label, times }: { label: string; times: string[] }) {
-  if (times.length === 0) {return null;}
+  if (times.length === 0) return null;
 
   return (
     <div className="flex items-baseline gap-2">
@@ -360,7 +396,7 @@ function TimeSection({ label, times }: { label: string; times: string[] }) {
 
 function formatTime(isoTime: string): string {
   const timePart = isoTime.split('T')[1];
-  if (!timePart) {return isoTime;}
+  if (!timePart) return isoTime;
 
   const [hourStr, minuteStr] = timePart.slice(0, 5).split(':');
   const hour = parseInt(hourStr ?? '0', 10);
