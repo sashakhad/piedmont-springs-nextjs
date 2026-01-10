@@ -6,5 +6,5 @@
     }
   },
   "buildCommand": "pnpm run build",
-  "installCommand": "pnpm install && pnpm exec playwright install chromium"
+  "installCommand": "pnpm install"
 }
