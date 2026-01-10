@@ -1,8 +1,10 @@
 /**
  * Token Service
  *
- * Obtains OAuth2 access tokens by intercepting API calls from the Booker web application.
- * Uses Playwright to load the booking site and capture the token from network requests.
+ * Obtains OAuth2 access tokens for the Booker API.
+ *
+ * In production (Vercel): Uses BOOKER_TOKEN environment variable
+ * In development: Falls back to Playwright scraping if no env token
  */
 
 import { BOOKING_URL, TOKEN_CACHE_MS } from './constants';
@@ -19,10 +21,22 @@ export async function getAccessToken(): Promise<string> {
     return cachedToken;
   }
 
-  // Obtain fresh token
+  // Try environment variable first (for production/Vercel)
+  const envToken = process.env.BOOKER_TOKEN;
+  if (envToken) {
+    console.log('Using BOOKER_TOKEN from environment');
+    cachedToken = envToken;
+    // Env tokens are refreshed externally, cache for 1 hour locally
+    tokenExpiry = Date.now() + 60 * 60 * 1000;
+    return envToken;
+  }
+
+  // Fall back to Playwright scraping (development only)
   const token = await obtainTokenViaPlaywright();
   if (!token) {
-    throw new Error('Failed to obtain access token from booking site');
+    throw new Error(
+      'Failed to obtain access token. Set BOOKER_TOKEN env var or ensure Playwright is available.'
+    );
   }
 
   // Cache the token
@@ -34,10 +48,18 @@ export async function getAccessToken(): Promise<string> {
 
 /**
  * Use Playwright to capture a fresh access token from the booking site.
+ * Only works in environments with Playwright available (local dev).
  */
 async function obtainTokenViaPlaywright(): Promise<string | null> {
-  // Dynamic import to avoid issues in environments without Playwright
-  const { chromium } = await import('playwright');
+  let chromium;
+  try {
+    // Dynamic import - will fail in serverless
+    const playwright = await import('playwright');
+    chromium = playwright.chromium;
+  } catch {
+    console.error('Playwright not available. Set BOOKER_TOKEN environment variable.');
+    return null;
+  }
 
   let accessToken: string | null = null;
 
