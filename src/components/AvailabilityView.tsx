@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import useSWR from 'swr';
 import { SERVICE_CONFIG } from '@/lib/piedmont/constants';
 import type { AvailabilityResponse, AvailabilityByDate, ServiceInfo } from '@/lib/piedmont/types';
 import { Button } from '@/components/ui/button';
@@ -16,41 +17,40 @@ const DATE_RANGES: Array<{ key: DateRange; label: string; days: number }> = [
   { key: 'month', label: 'Month', days: 30 },
 ];
 
+const fetcher = async (url: string): Promise<AvailabilityResponse> => {
+  const response = await fetch(url);
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || 'Failed to fetch availability');
+  }
+  return response.json();
+};
+
 interface AvailabilityViewProps {
   initialData?: AvailabilityResponse | null;
 }
 
 export function AvailabilityView({ initialData }: AvailabilityViewProps) {
-  const [data, setData] = useState<AvailabilityResponse | null>(initialData ?? null);
-  const [loading, setLoading] = useState(!initialData);
-  const [error, setError] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>('week');
   const [selectedService, setSelectedService] = useState<string>(SERVICE_CONFIG[0]?.name ?? '');
 
   const currentDays = DATE_RANGES.find((r) => r.key === dateRange)?.days ?? 7;
 
-  async function fetchAvailability(days: number) {
-    setLoading(true);
-    setError(null);
+  const swrOptions = {
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+    dedupingInterval: 60000, // Don't refetch same key within 1 minute
+    keepPreviousData: true, // Show previous data while loading new range
+    ...(initialData ? { fallbackData: initialData } : {}),
+  };
 
-    try {
-      const response = await fetch(`/api/availability?days=${days}`);
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to fetch availability');
-      }
-      const result: AvailabilityResponse = await response.json();
-      setData(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-    }
-  }
+  const { data, error, isLoading, isValidating, mutate } = useSWR<AvailabilityResponse>(
+    `/api/availability?days=${currentDays}`,
+    fetcher,
+    swrOptions
+  );
 
-  useEffect(() => {
-    fetchAvailability(currentDays);
-  }, [currentDays]);
+  const loading = isLoading || isValidating;
 
   function handleDateRangeChange(range: DateRange) {
     setDateRange(range);
@@ -79,16 +79,18 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
     );
   }
 
-  if (error) {
+  if (error && !data) {
     return (
       <div className="flex min-h-[400px] flex-col items-center justify-center gap-4">
         <div className="text-center">
           <p className="text-lg font-medium text-red-600 dark:text-red-400">
             Error loading availability
           </p>
-          <p className="mt-1 text-stone-500 dark:text-stone-400">{error}</p>
+          <p className="mt-1 text-stone-500 dark:text-stone-400">
+            {error instanceof Error ? error.message : 'An error occurred'}
+          </p>
         </div>
-        <Button onClick={() => fetchAvailability(currentDays)} variant="outline">
+        <Button onClick={() => mutate()} variant="outline">
           <RefreshCw className="mr-2 h-4 w-4" />
           Try Again
         </Button>
@@ -120,7 +122,7 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
           ))}
         </div>
         <Button
-          onClick={() => fetchAvailability(currentDays)}
+          onClick={() => mutate()}
           variant="ghost"
           size="sm"
           disabled={loading}
