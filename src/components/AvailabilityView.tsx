@@ -68,7 +68,7 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
       refreshInterval: 60 * 60 * 1000, // Auto-refresh every hour
-      dedupingInterval: 5 * 60 * 1000, // Don't refetch within 5 minutes
+      dedupingInterval: 60 * 60 * 1000, // Don't refetch within 1 hour (matches edge cache)
       ...(initialData ? { fallbackData: initialData } : {}),
     }
   );
@@ -233,16 +233,23 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
       </div>
 
       {/* Footer */}
-      <footer className="border-t border-stone-200 pt-4 text-center dark:border-stone-700">
-        <a
-          href="https://go.booker.com/location/PiedmontSprings"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1 text-sm text-amber-600 hover:underline dark:text-amber-500"
-        >
-          Book at piedmontsprings.com
-          <ExternalLink className="h-3 w-3" />
-        </a>
+      <footer className="border-t border-stone-200 pt-4 dark:border-stone-700">
+        <div className="flex flex-col items-center gap-2 text-center">
+          <a
+            href="https://go.booker.com/location/PiedmontSprings"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-sm text-amber-600 hover:underline dark:text-amber-500"
+          >
+            Book at piedmontsprings.com
+            <ExternalLink className="h-3 w-3" />
+          </a>
+          {data?.fetchedAt && (
+            <p className="text-xs text-stone-400 dark:text-stone-500">
+              Last updated {formatFetchTime(data.fetchedAt)}
+            </p>
+          )}
+        </div>
       </footer>
     </div>
   );
@@ -404,4 +411,24 @@ function formatTime(isoTime: string): string {
   const displayHour = hour % 12 || 12;
 
   return `${displayHour}:${minute.toString().padStart(2, '0')}`;
+}
+
+function formatFetchTime(isoTime: string): string {
+  const date = new Date(isoTime);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+
+  if (diffMins < 1) return 'just now';
+  if (diffMins < 60) return `${diffMins} min ago`;
+
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
