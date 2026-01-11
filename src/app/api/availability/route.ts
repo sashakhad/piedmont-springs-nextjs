@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAllAvailability, getTargetServices } from '@/lib/piedmont/api-client';
 import { DEFAULT_DAYS } from '@/lib/piedmont/constants';
+import { getTodayPacific, getDatePlusDaysPacific } from '@/lib/piedmont/date-utils';
 import type { AvailabilityResponse } from '@/lib/piedmont/types';
 
 export const dynamic = 'force-dynamic';
@@ -21,10 +22,13 @@ export async function GET(request: NextRequest): Promise<NextResponse<Availabili
     const daysParam = searchParams.get('days');
     const days = daysParam ? Math.min(Math.max(parseInt(daysParam, 10), 1), 60) : DEFAULT_DAYS;
 
-    // Calculate date range
-    const fromDate = new Date();
-    const toDate = new Date();
-    toDate.setDate(toDate.getDate() + days);
+    // Calculate date range in Pacific timezone
+    const fromDateStr = getTodayPacific();
+    const toDateStr = getDatePlusDaysPacific(days);
+    
+    // Convert to Date objects for the API (use noon to avoid DST issues)
+    const fromDate = new Date(`${fromDateStr}T12:00:00-08:00`);
+    const toDate = new Date(`${toDateStr}T12:00:00-08:00`);
 
     // Fetch services first
     const services = await getTargetServices();
@@ -38,16 +42,11 @@ export async function GET(request: NextRequest): Promise<NextResponse<Availabili
     // Fetch availability
     const availability = await getAllAvailability(fromDate, toDate, services);
 
-    const formatDate = (d: Date): string => {
-      const parts = d.toISOString().split('T');
-      return parts[0] ?? '';
-    };
-
     const response: AvailabilityResponse = {
       availability,
       services: servicesInfo,
-      fromDate: formatDate(fromDate),
-      toDate: formatDate(toDate),
+      fromDate: fromDateStr,
+      toDate: toDateStr,
       fetchedAt: new Date().toISOString(),
     };
 

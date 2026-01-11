@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { RefreshCw, Loader2, ExternalLink, Calendar, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { buildBookingUrl } from '@/lib/piedmont/client-utils';
+import { getTodayPacific, getDatePlusDaysPacific, isTodayPacific, isTomorrowPacific, formatDateForDisplay } from '@/lib/piedmont/date-utils';
 
 type DateRange = 'week' | 'two-weeks' | 'month';
 
@@ -33,17 +34,16 @@ function filterAvailabilityByDays(
   availability: Record<string, AvailabilityByDate>,
   days: number
 ): Record<string, AvailabilityByDate> {
-  const today = new Date();
-  const cutoff = new Date(today);
-  cutoff.setDate(cutoff.getDate() + days);
-  const cutoffStr = cutoff.toISOString().split('T')[0] ?? '';
+  const todayStr = getTodayPacific();
+  const cutoffStr = getDatePlusDaysPacific(days);
 
   const filtered: Record<string, AvailabilityByDate> = {};
 
   for (const [serviceName, dates] of Object.entries(availability)) {
     filtered[serviceName] = {};
     for (const [dateStr, slots] of Object.entries(dates)) {
-      if (dateStr <= cutoffStr) {
+      // Include dates from today up to the cutoff
+      if (dateStr >= todayStr && dateStr <= cutoffStr) {
         filtered[serviceName][dateStr] = slots;
       }
     }
@@ -305,19 +305,11 @@ interface DateRowProps {
 
 function DateRow({ date, slots, serviceId, serviceName }: DateRowProps) {
   const bookingUrl = buildBookingUrl(serviceId, serviceName, date);
-  const dateObj = new Date(`${date}T00:00:00`);
-  const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
-  const monthDay = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const { dayName, monthDay } = formatDateForDisplay(date);
 
-  // Check if today/tomorrow by comparing date strings
-  const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
-  const tomorrow = new Date(today);
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().split('T')[0];
-
-  const isToday = date === todayStr;
-  const isTomorrow = date === tomorrowStr;
+  // Check if today/tomorrow in Pacific timezone
+  const isToday = isTodayPacific(date);
+  const isTomorrow = isTomorrowPacific(date);
 
   // Group by time of day
   const morning: string[] = [];
