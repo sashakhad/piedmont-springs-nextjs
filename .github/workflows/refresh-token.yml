@@ -1,0 +1,97 @@
+name: Refresh Booker Token
+
+on:
+  schedule:
+    # Run every 3 hours
+    - cron: '0 */3 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  refresh-token:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install chromium
+
+      - name: Get fresh token
+        id: get-token
+        run: |
+          TOKEN=$(npx tsx scripts/get-token.ts 2>&1 | grep -E '^eyJ' | head -1)
+          if [ -z "$TOKEN" ]; then
+            echo "Failed to obtain token"
+            exit 1
+          fi
+          echo "Token obtained successfully (length: ${#TOKEN})"
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Delete old BOOKER_TOKEN from Vercel
+        continue-on-error: true
+        run: |
+          # Get env var ID first
+          ENV_ID=$(curl -s -X GET "https://api.vercel.com/v9/projects/${{ secrets.VERCEL_PROJECT_ID }}/env" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+            | jq -r '.envs[] | select(.key == "BOOKER_TOKEN" and .target[] == "production") | .id' | head -1)
+          
+          if [ -n "$ENV_ID" ] && [ "$ENV_ID" != "null" ]; then
+            echo "Deleting existing BOOKER_TOKEN (ID: $ENV_ID)"
+            curl -s -X DELETE "https://api.vercel.com/v9/projects/${{ secrets.VERCEL_PROJECT_ID }}/env/$ENV_ID" \
+              -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}"
+          else
+            echo "No existing BOOKER_TOKEN found"
+          fi
+
+      - name: Add new BOOKER_TOKEN to Vercel
+        run: |
+          RESPONSE=$(curl -s -X POST "https://api.vercel.com/v10/projects/${{ secrets.VERCEL_PROJECT_ID }}/env" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "key": "BOOKER_TOKEN",
+              "value": "${{ steps.get-token.outputs.token }}",
+              "type": "encrypted",
+              "target": ["production"]
+            }')
+          
+          echo "Response: $RESPONSE"
+          
+          if echo "$RESPONSE" | jq -e '.error' > /dev/null 2>&1; then
+            echo "Error adding env var"
+            exit 1
+          fi
+          
+          echo "✓ BOOKER_TOKEN updated successfully"
+
+      - name: Trigger Vercel redeploy
+        run: |
+          # Get the latest deployment to redeploy
+          DEPLOYMENT=$(curl -s -X GET "https://api.vercel.com/v6/deployments?projectId=${{ secrets.VERCEL_PROJECT_ID }}&limit=1&target=production" \
+            -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+            | jq -r '.deployments[0].uid')
+          
+          if [ -n "$DEPLOYMENT" ] && [ "$DEPLOYMENT" != "null" ]; then
+            echo "Triggering redeploy..."
+            curl -s -X POST "https://api.vercel.com/v13/deployments?forceNew=1" \
+              -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d "{\"name\": \"piedmont-springs-nextjs\", \"project\": \"${{ secrets.VERCEL_PROJECT_ID }}\", \"target\": \"production\", \"gitSource\": {\"type\": \"github\", \"repoId\": \"$(curl -s -X GET "https://api.vercel.com/v9/projects/${{ secrets.VERCEL_PROJECT_ID }}" -H "Authorization: Bearer ${{ secrets.VERCEL_TOKEN }}" | jq -r '.link.repoId')\", \"ref\": \"main\"}}"
+            echo "✓ Redeploy triggered"
+          else
+            echo "Could not find deployment to redeploy"
+          fi
