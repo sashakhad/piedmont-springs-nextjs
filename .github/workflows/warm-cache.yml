@@ -1,0 +1,27 @@
+name: Warm Cache
+
+on:
+  schedule:
+    # Run every 15 minutes
+    - cron: '*/15 * * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  warm-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Warm the availability cache
+        run: |
+          echo "Warming cache at $(date)"
+          
+          # Hit the API endpoint to warm the edge cache
+          RESPONSE=$(curl -s -w "\n%{http_code}" "https://piedmont-springs-nextjs.vercel.app/api/availability?days=30")
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✓ Cache warmed successfully (HTTP $HTTP_CODE)"
+          else
+            echo "✗ Cache warming failed (HTTP $HTTP_CODE)"
+            echo "$RESPONSE" | head -5
+            exit 1
+          fi

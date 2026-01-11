@@ -67,8 +67,8 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
     {
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
-      refreshInterval: 60 * 60 * 1000, // Auto-refresh every hour
-      dedupingInterval: 60 * 60 * 1000, // Don't refetch within 1 hour (matches edge cache)
+      refreshInterval: 15 * 60 * 1000, // Auto-refresh every 15 min (matches edge cache)
+      dedupingInterval: 15 * 60 * 1000, // Don't refetch within 15 min
       ...(initialData ? { fallbackData: initialData } : {}),
     }
   );

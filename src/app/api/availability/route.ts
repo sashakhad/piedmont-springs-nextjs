@@ -52,8 +52,9 @@ export async function GET(request: NextRequest): Promise<NextResponse<Availabili
 
     return NextResponse.json(response, {
       headers: {
-        // Cache for 1 hour on CDN, allow stale for 4 hours while revalidating
-        'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=14400',
+        // Cache for 15 min on CDN, allow stale for 1 hour while revalidating
+        // GitHub Actions warms this cache every 15 min for instant loads
+        'Cache-Control': 'public, s-maxage=900, stale-while-revalidate=3600',
       },
     });
   } catch (error) {

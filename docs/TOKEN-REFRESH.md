@@ -1,8 +1,11 @@
-# Booker Token Auto-Refresh System
+# Automated Caching & Token System
 
 ## Overview
 
-The Piedmont Springs app needs an OAuth access token to fetch availability data from Booker's API. These tokens expire every ~4 hours, so we have an automated system to refresh them.
+The Piedmont Springs app uses two automated systems:
+
+1. **Cache Warming** - Fetches availability data every 15 minutes so users always get instant loads
+2. **Token Refresh** - Refreshes the Booker API token every 3 hours before it expires
 
 ## Architecture
 
@@ -37,7 +40,21 @@ The Piedmont Springs app needs an OAuth access token to fetch availability data 
 
 ## Components
 
-### 1. GitHub Actions Workflow
+### 1. Cache Warming Workflow
+**File:** `.github/workflows/warm-cache.yml`
+
+**Schedule:** Every 15 minutes (`*/15 * * * *`)
+
+**What it does:**
+- Calls the `/api/availability?days=30` endpoint
+- This keeps the Vercel edge cache warm
+- Users always hit pre-cached data = instant loads
+
+**Why GitHub Actions?** It's free, reliable, and runs externally (not consuming your Vercel function quota).
+
+---
+
+### 2. Token Refresh Workflow
 **File:** `.github/workflows/refresh-token.yml`
 
 **Schedule:** Every 3 hours (`0 */3 * * *`)
@@ -143,5 +160,8 @@ Hour 4:  Old token would expire, but we already have a new one ✓
 
 ## Cost
 
-- **GitHub Actions:** Free tier includes 2,000 minutes/month. This workflow uses ~1 min per run × 8 runs/day × 30 days = ~240 minutes/month. Well within free tier.
-- **Vercel:** No additional cost. Uses existing deployment infrastructure.
+- **GitHub Actions:** Free tier includes 2,000 minutes/month.
+  - Token refresh: ~1 min × 8 runs/day = ~240 min/month
+  - Cache warming: ~0.1 min × 96 runs/day = ~290 min/month  
+  - **Total: ~530 min/month** - Well within free tier
+- **Vercel:** No additional cost. Edge cache is free.
