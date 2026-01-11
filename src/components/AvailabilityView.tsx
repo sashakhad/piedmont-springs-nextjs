@@ -5,12 +5,13 @@ import useSWR from 'swr';
 import { SERVICE_CONFIG } from '@/lib/piedmont/constants';
 import type { AvailabilityResponse, AvailabilityByDate, ServiceInfo } from '@/lib/piedmont/types';
 import { Button } from '@/components/ui/button';
-import { RefreshCw, Loader2, ExternalLink, Calendar, ChevronRight } from 'lucide-react';
+import { RefreshCw, Loader2, ExternalLink, Calendar, ChevronRight, LayoutGrid, List } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { buildBookingUrl } from '@/lib/piedmont/client-utils';
 import { getTodayPacific, getDatePlusDaysPacific, isTodayPacific, isTomorrowPacific, formatDateForDisplay } from '@/lib/piedmont/date-utils';
 
 type DateRange = 'week' | 'two-weeks' | 'month';
+type ViewMode = 'service' | 'date';
 
 const DATE_RANGES: Array<{ key: DateRange; label: string; days: number }> = [
   { key: 'week', label: 'This Week', days: 7 },
@@ -58,6 +59,7 @@ interface AvailabilityViewProps {
 
 export function AvailabilityView({ initialData }: AvailabilityViewProps) {
   const [dateRange, setDateRange] = useState<DateRange>('week');
+  const [viewMode, setViewMode] = useState<ViewMode>('date');
   const [selectedService, setSelectedService] = useState<string>(SERVICE_CONFIG[0]?.name ?? '');
 
   // Always fetch full month - we'll filter locally for week/2-weeks
@@ -111,6 +113,34 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
     return counts;
   }, [filteredAvailability]);
 
+  // Reorganize data by date (for date-first view)
+  const availabilityByDate = useMemo(() => {
+    const byDate: Record<string, Array<{ serviceName: string; serviceId: number; slotCount: number }>> = {};
+    
+    for (const [serviceName, dates] of Object.entries(filteredAvailability)) {
+      const serviceInfo = serviceMap.get(serviceName);
+      if (!serviceInfo) continue;
+      
+      for (const [dateStr, slots] of Object.entries(dates)) {
+        if (!byDate[dateStr]) {
+          byDate[dateStr] = [];
+        }
+        byDate[dateStr].push({
+          serviceName,
+          serviceId: serviceInfo.id,
+          slotCount: slots.length,
+        });
+      }
+    }
+    
+    // Sort services within each date by slot count (descending)
+    for (const dateStr of Object.keys(byDate)) {
+      byDate[dateStr]?.sort((a, b) => b.slotCount - a.slotCount);
+    }
+    
+    return byDate;
+  }, [filteredAvailability, serviceMap]);
+
   if (loading && !data) {
     return (
       <div className="flex min-h-[400px] flex-col items-center justify-center gap-4">
@@ -144,8 +174,9 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
 
   return (
     <div className="space-y-6">
-      {/* Date Range Selector */}
+      {/* Controls Row */}
       <div className="flex flex-wrap items-center justify-between gap-4">
+        {/* Date Range Selector */}
         <div className="flex gap-2">
           {DATE_RANGES.map((range) => (
             <Button
@@ -164,73 +195,113 @@ export function AvailabilityView({ initialData }: AvailabilityViewProps) {
             </Button>
           ))}
         </div>
-        <Button
-          onClick={() => mutate()}
-          variant="ghost"
-          size="sm"
-          disabled={refreshing}
-          title="Refresh availability"
-        >
-          <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
-        </Button>
+        
+        {/* View Toggle + Refresh */}
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-stone-200 dark:border-stone-700 p-0.5">
+            <button
+              onClick={() => setViewMode('date')}
+              className={cn(
+                'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
+                viewMode === 'date'
+                  ? 'bg-stone-100 text-stone-800 dark:bg-stone-700 dark:text-stone-200'
+                  : 'text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-300'
+              )}
+              title="View by date"
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">By Date</span>
+            </button>
+            <button
+              onClick={() => setViewMode('service')}
+              className={cn(
+                'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
+                viewMode === 'service'
+                  ? 'bg-stone-100 text-stone-800 dark:bg-stone-700 dark:text-stone-200'
+                  : 'text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-300'
+              )}
+              title="View by service"
+            >
+              <List className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">By Service</span>
+            </button>
+          </div>
+          <Button
+            onClick={() => mutate()}
+            variant="ghost"
+            size="sm"
+            disabled={refreshing}
+            title="Refresh availability"
+          >
+            <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
+          </Button>
+        </div>
       </div>
 
-      {/* Service Tabs */}
-      <div className="flex gap-1 overflow-x-auto border-b border-stone-200 dark:border-stone-700 pb-px">
-        {SERVICE_CONFIG.map((config) => {
-          const isSelected = selectedService === config.name;
-          const totalSlots = serviceCounts[config.name] ?? 0;
+      {/* View Content */}
+      {viewMode === 'service' ? (
+        <>
+          {/* Service Tabs */}
+          <div className="flex gap-1 overflow-x-auto border-b border-stone-200 dark:border-stone-700 pb-px">
+            {SERVICE_CONFIG.map((config) => {
+              const isSelected = selectedService === config.name;
+              const totalSlots = serviceCounts[config.name] ?? 0;
 
-          return (
-            <button
-              key={config.name}
-              onClick={() => setSelectedService(config.name)}
-              className={cn(
-                'flex items-center gap-2 whitespace-nowrap px-4 py-2.5 text-sm font-medium transition-colors',
-                'border-b-2 -mb-px',
-                isSelected
-                  ? 'border-amber-500 text-amber-700 dark:text-amber-400'
-                  : 'border-transparent text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-300'
-              )}
-            >
-              <span>{config.icon}</span>
-              <span className="hidden sm:inline">{config.name.replace(/^\d+\s*Minute\s*/, '').replace('One Hour ', '')}</span>
-              {totalSlots > 0 && (
-                <span
+              return (
+                <button
+                  key={config.name}
+                  onClick={() => setSelectedService(config.name)}
                   className={cn(
-                    'rounded-full px-1.5 py-0.5 text-xs',
+                    'flex items-center gap-2 whitespace-nowrap px-4 py-2.5 text-sm font-medium transition-colors',
+                    'border-b-2 -mb-px',
                     isSelected
-                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300'
-                      : 'bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400'
+                      ? 'border-amber-500 text-amber-700 dark:text-amber-400'
+                      : 'border-transparent text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-300'
                   )}
                 >
-                  {totalSlots}
+                  <span>{config.icon}</span>
+                  <span className="hidden sm:inline">{config.name.replace(/^\d+\s*Minute\s*/, '').replace('One Hour ', '')}</span>
+                  {totalSlots > 0 && (
+                    <span
+                      className={cn(
+                        'rounded-full px-1.5 py-0.5 text-xs',
+                        isSelected
+                          ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300'
+                          : 'bg-stone-100 text-stone-500 dark:bg-stone-800 dark:text-stone-400'
+                      )}
+                    >
+                      {totalSlots}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Selected Service Content */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-stone-800 dark:text-stone-200">
+                {selectedService}
+              </h2>
+              {selectedServiceInfo && (
+                <span className="text-sm text-stone-500 dark:text-stone-400">
+                  ${selectedServiceInfo.price} · {selectedServiceInfo.durationMinutes} min
                 </span>
               )}
-            </button>
-          );
-        })}
-      </div>
+            </div>
 
-      {/* Selected Service Content */}
-      <div className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-stone-800 dark:text-stone-200">
-            {selectedService}
-          </h2>
-          {selectedServiceInfo && (
-            <span className="text-sm text-stone-500 dark:text-stone-400">
-              ${selectedServiceInfo.price} · {selectedServiceInfo.durationMinutes} min
-            </span>
-          )}
-        </div>
-
-        <AvailabilityGrid
-          availability={selectedAvailability}
-          serviceId={selectedServiceInfo?.id ?? 0}
-          serviceName={selectedService}
-        />
-      </div>
+            <AvailabilityGrid
+              availability={selectedAvailability}
+              serviceId={selectedServiceInfo?.id ?? 0}
+              serviceName={selectedService}
+            />
+          </div>
+        </>
+      ) : (
+        /* Date-first View */
+        <DateFirstView availabilityByDate={availabilityByDate} serviceMap={serviceMap} />
+      )}
 
       {/* Footer */}
       <footer className="border-t border-stone-200 pt-4 dark:border-stone-700">
@@ -423,4 +494,129 @@ function formatFetchTime(isoTime: string): string {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+// --- Date First View Component ---
+
+interface DateFirstViewProps {
+  availabilityByDate: Record<string, Array<{ serviceName: string; serviceId: number; slotCount: number }>>;
+  serviceMap: Map<string, ServiceInfo>;
+}
+
+function DateFirstView({ availabilityByDate, serviceMap }: DateFirstViewProps) {
+  const sortedDates = Object.keys(availabilityByDate).sort();
+
+  if (sortedDates.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-stone-300 bg-stone-50 py-12 text-center dark:border-stone-700 dark:bg-stone-900/50">
+        <p className="text-stone-500 dark:text-stone-400">No availability in this time range</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {sortedDates.map((date) => {
+        const services = availabilityByDate[date];
+        if (!services || services.length === 0) return null;
+
+        return (
+          <DateCard key={date} date={date} services={services} serviceMap={serviceMap} />
+        );
+      })}
+    </div>
+  );
+}
+
+interface DateCardProps {
+  date: string;
+  services: Array<{ serviceName: string; serviceId: number; slotCount: number }>;
+  serviceMap: Map<string, ServiceInfo>;
+}
+
+function DateCard({ date, services, serviceMap }: DateCardProps) {
+  const { dayName, monthDay } = formatDateForDisplay(date);
+  const isToday = isTodayPacific(date);
+  const isTomorrow = isTomorrowPacific(date);
+
+  // Get icon for service
+  const getServiceIcon = (serviceName: string): string => {
+    const config = SERVICE_CONFIG.find((c) => c.name === serviceName);
+    return config?.icon ?? '📅';
+  };
+
+  // Get short name for service
+  const getShortName = (serviceName: string): string => {
+    return serviceName
+      .replace(/^\d+\s*Minute\s*/, '')
+      .replace('One Hour ', '');
+  };
+
+  return (
+    <div
+      className={cn(
+        'rounded-lg border p-4',
+        'border-stone-200 bg-white dark:border-stone-700 dark:bg-stone-800/50'
+      )}
+    >
+      {/* Date Header */}
+      <div className="mb-3 flex items-baseline gap-3">
+        <span
+          className={cn(
+            'text-xs font-semibold uppercase tracking-wide',
+            isToday
+              ? 'text-amber-600 dark:text-amber-400'
+              : isTomorrow
+                ? 'text-blue-600 dark:text-blue-400'
+                : 'text-stone-400 dark:text-stone-500'
+          )}
+        >
+          {isToday ? 'Today' : isTomorrow ? 'Tomorrow' : dayName}
+        </span>
+        <span className="text-lg font-semibold text-stone-800 dark:text-stone-200">
+          {monthDay}
+        </span>
+      </div>
+
+      {/* Services Grid */}
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {services.map(({ serviceName, serviceId, slotCount }) => {
+          const serviceInfo = serviceMap.get(serviceName);
+          const bookingUrl = buildBookingUrl(serviceId, serviceName, date);
+
+          return (
+            <a
+              key={serviceName}
+              href={bookingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={cn(
+                'group flex items-center gap-3 rounded-lg border p-3 transition-all',
+                'border-stone-100 bg-stone-50 hover:border-amber-400 hover:bg-amber-50',
+                'dark:border-stone-700 dark:bg-stone-800 dark:hover:border-amber-500 dark:hover:bg-stone-700'
+              )}
+            >
+              <span className="text-xl">{getServiceIcon(serviceName)}</span>
+              <div className="flex-1 min-w-0">
+                <div className="truncate text-sm font-medium text-stone-700 group-hover:text-amber-700 dark:text-stone-300 dark:group-hover:text-amber-400">
+                  {getShortName(serviceName)}
+                </div>
+                {serviceInfo && (
+                  <div className="text-xs text-stone-400 dark:text-stone-500">
+                    ${serviceInfo.price} · {serviceInfo.durationMinutes}min
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/50 dark:text-amber-300">
+                  {slotCount}
+                </span>
+                <ChevronRight className="h-4 w-4 text-stone-300 group-hover:text-amber-500 dark:text-stone-600" />
+              </div>
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
