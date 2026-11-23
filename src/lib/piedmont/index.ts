@@ -7,4 +7,4 @@
 export * from './types';
 export * from './constants';
 export * from './api-client';
-export { getAccessToken, clearTokenCache } from './token-service';
+export { getAccessToken, refreshAccessToken, clearTokenCache } from './token-service';

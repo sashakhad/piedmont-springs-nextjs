@@ -12,7 +12,7 @@ import {
   SUBSCRIPTION_KEY,
   TARGET_SERVICE_KEYWORDS,
 } from './constants';
-import { getAccessToken } from './token-service';
+import { getAccessToken, refreshAccessToken } from './token-service';
 import type {
   AvailabilityByService,
   BookerAvailabilityLocation,
@@ -29,7 +29,8 @@ async function apiRequest<T>(
   method: 'GET' | 'POST',
   endpoint: string,
   params?: Record<string, string | number>,
-  jsonData?: Record<string, unknown>
+  jsonData?: Record<string, unknown>,
+  retried = false
 ): Promise<T> {
   const token = await getAccessToken();
 
@@ -51,12 +52,25 @@ async function apiRequest<T>(
   const fetchOptions: RequestInit = {
     method,
     headers,
+    cache: 'no-store',
   };
   if (jsonData) {
     fetchOptions.body = JSON.stringify(jsonData);
   }
 
   const response = await fetch(url.toString(), fetchOptions);
+
+  if (response.status === 401 && !retried) {
+    await response.arrayBuffer().catch(() => undefined);
+    console.warn('Booker API returned 401; refreshing guest token and retrying once');
+    try {
+      await refreshAccessToken(token);
+    } catch (refreshError) {
+      const reason = refreshError instanceof Error ? refreshError.message : 'token refresh failed';
+      throw new Error(`API request failed: 401 Unauthorized (${reason})`);
+    }
+    return apiRequest(method, endpoint, params, jsonData, true);
+  }
 
   if (!response.ok) {
     throw new Error(`API request failed: ${response.status} ${response.statusText}`);
@@ -129,8 +143,8 @@ export async function getAllServices(): Promise<Service[]> {
  */
 export async function getTargetServices(): Promise<Service[]> {
   const allServices = await getAllServices();
-  return allServices.filter((s) =>
-    TARGET_SERVICE_KEYWORDS.some((kw) => s.name.toLowerCase().includes(kw))
+  return allServices.filter(s =>
+    TARGET_SERVICE_KEYWORDS.some(kw => s.name.toLowerCase().includes(kw))
   );
 }
 
@@ -244,7 +258,7 @@ export async function getAllAvailability(
 
     // Get time slots for each available date
     for (const dateStr of availableDates) {
-      const dateObj = new Date(`${dateStr  }T00:00:00`);
+      const dateObj = new Date(`${dateStr}T00:00:00`);
       const slots = await getTimeSlots(serviceId, dateObj);
       if (slots.length > 0) {
         result[serviceName][dateStr] = slots;
